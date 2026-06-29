@@ -69,5 +69,30 @@ def run_ffmpeg(args: list) -> str:
     return T.run_ffmpeg(args)
 
 
+@mcp.tool()
+def auto_jumpcut(input: str, output: str, threshold_db: float = -30.0,
+                 min_silence: float = 0.4) -> str:
+    """Remove silent gaps / dead air for a tight jump-cut edit."""
+    return T.auto_jumpcut(input, output, threshold_db, min_silence)
+
+
+@mcp.tool()
+def captions(input: str, output: str, max_words: int = 5, font_size: int = 64) -> str:
+    """Burn animated word-by-word ('karaoke') captions — the trendy look."""
+    return T.captions(input, output, max_words, font_size)
+
+
+@mcp.tool()
+def reframe_vertical(input: str, output: str, face_x: float = -1.0) -> str:
+    """Crop to 9:16 keeping the speaker centered (face-aware). face_x<0 = auto-detect."""
+    return T.reframe_vertical(input, output, None if face_x < 0 else face_x)
+
+
+@mcp.tool()
+def normalize_audio(input: str, output: str) -> str:
+    """Loudness-normalize to -14 LUFS (social target) via EBU R128."""
+    return T.normalize_audio(input, output)
+
+
 if __name__ == "__main__":
     mcp.run()

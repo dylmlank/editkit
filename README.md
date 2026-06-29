@@ -18,11 +18,20 @@ Both drive the same ffmpeg/whisper tool layer over your local video files.
 - **speed / add_text / concat / extract_audio** — speed ramps, titles, joins
 - **run_ffmpeg** — the escape hatch: any ffmpeg command for custom edits
 
+**Trendy-edit engine (new):**
+- **captions** — animated word-by-word ("karaoke") captions burned in, the modern
+  TikTok/Shorts look
+- **auto_jumpcut** — strips dead air / long pauses for a tight, punchy cut
+- **reframe_vertical** — face-aware 9:16 crop that keeps the *speaker* centered
+  (OpenCV), not just the middle of the frame
+- **normalize_audio** — −14 LUFS loudness for platform-ready volume
+
 So *"turn stream.mp4 into three 30-second vertical TikToks with captions"* becomes:
-probe → transcribe → Claude chooses the best moments → make_clip ×3.
+probe → transcribe → Claude picks the best moments → make_clip → reframe_vertical →
+auto_jumpcut → captions → normalize_audio.
 
 The "trendy" judgment is Claude's — it reads the transcript and selects the
-funny/surprising/quotable beats, rather than a fixed heuristic.
+funny/surprising/quotable beats, then applies the engine above.
 
 ## Setup
 
