@@ -25,6 +25,9 @@ Both drive the same ffmpeg/whisper tool layer over your local video files.
 - **reframe_vertical** — face-aware 9:16 crop that keeps the *speaker* centered
   (OpenCV), not just the middle of the frame
 - **normalize_audio** — −14 LUFS loudness for platform-ready volume
+- **add_music** — lay a background music bed under the video with **auto-ducking**
+  (music dips under the voice via sidechain compression); loops to fill
+- **detect_beats** — tempo + beat timestamps so Claude can cut on the beat
 
 So *"turn stream.mp4 into three 30-second vertical TikToks with captions"* becomes:
 probe → transcribe → Claude picks the best moments → make_clip → reframe_vertical →

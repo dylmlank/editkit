@@ -3,4 +3,5 @@ anthropic>=0.40        # standalone agent (agent.py)
 mcp>=1.2               # MCP server / FastMCP (mcp_server.py)
 faster-whisper>=1.2    # transcription + word timing (transcribe, captions)
 opencv-python>=4.8     # optional: face-aware reframing (reframe_vertical)
+librosa>=0.10          # optional: beat detection (detect_beats)
 # Also requires ffmpeg + ffprobe on PATH (install separately).

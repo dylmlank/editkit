@@ -94,5 +94,18 @@ def normalize_audio(input: str, output: str) -> str:
     return T.normalize_audio(input, output)
 
 
+@mcp.tool()
+def add_music(input: str, music: str, output: str, music_db: float = -18.0,
+              duck: bool = True) -> str:
+    """Lay a background music bed under the video; duck=True ducks it under the voice."""
+    return T.add_music(input, music, output, music_db, duck)
+
+
+@mcp.tool()
+def detect_beats(music: str) -> str:
+    """Detect tempo + beat timestamps (seconds) so you can cut on the beat."""
+    return T.detect_beats(music)
+
+
 if __name__ == "__main__":
     mcp.run()

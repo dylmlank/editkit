@@ -314,12 +314,51 @@ def normalize_audio(input: str, output: str) -> str:
     return f"Normalized -> {out}" if r == "ok" else r
 
 
+def add_music(input: str, music: str, output: str, music_db: float = -18.0,
+              duck: bool = True) -> str:
+    """Lay a background music bed under the video. duck=True sidechains the music
+    down whenever the voice is present, so dialogue stays clear. Music loops to
+    fill the video length."""
+    for f in (input, music):
+        if not Path(f).exists():
+            return f"No such file: {f}"
+    out = _out(output)
+    if duck:
+        fc = (f"[1:a]volume={music_db}dB[m];"
+              f"[m][0:a]sidechaincompress=threshold=0.05:ratio=8:attack=20:release=300[d];"
+              f"[0:a][d]amix=inputs=2:duration=first:dropout_transition=0[a]")
+    else:
+        fc = (f"[1:a]volume={music_db}dB[m];"
+              f"[0:a][m]amix=inputs=2:duration=first:dropout_transition=0[a]")
+    r = _ff(["-i", input, "-stream_loop", "-1", "-i", music, "-filter_complex", fc,
+             "-map", "0:v", "-map", "[a]", "-c:v", "copy", "-shortest", out])
+    return (f"Music bed{' + ducking' if duck else ''} -> {out}") if r == "ok" else r
+
+
+def detect_beats(music: str) -> str:
+    """Detect tempo + beat timestamps in a music track so you can cut on the beat.
+    Needs librosa. Returns BPM and beat times (seconds) to feed make_clip/concat."""
+    if not Path(music).exists():
+        return f"No such file: {music}"
+    try:
+        import librosa
+    except ImportError:
+        return "librosa not installed (pip install librosa) — needed for beat detection."
+    y, sr = librosa.load(music)
+    tempo, beats = librosa.beat.beat_track(y=y, sr=sr)
+    times = librosa.frames_to_time(beats, sr=sr)
+    head = ", ".join(f"{t:.2f}" for t in times[:48])
+    return (f"~{float(tempo):.0f} BPM, {len(times)} beats. "
+            f"Beat times (s): {head}{' ...' if len(times) > 48 else ''}")
+
+
 _HANDLERS = {
     "probe": probe, "transcribe": transcribe, "make_clip": make_clip,
     "speed": speed, "add_text": add_text, "concat": concat,
     "extract_audio": extract_audio, "run_ffmpeg": run_ffmpeg,
     "auto_jumpcut": auto_jumpcut, "captions": captions,
     "reframe_vertical": reframe_vertical, "normalize_audio": normalize_audio,
+    "add_music": add_music, "detect_beats": detect_beats,
 }
 
 TOOLS = [
@@ -375,6 +414,15 @@ TOOLS = [
      "description": "Loudness-normalize to -14 LUFS (social target) via EBU R128 — do this as a final pass for consistent volume.",
      "input_schema": {"type": "object", "properties": {
          "input": {"type": "string"}, "output": {"type": "string"}}, "required": ["input", "output"]}},
+    {"name": "add_music",
+     "description": "Lay a background music track under the video. duck=True (default) auto-ducks the music under the voice so dialogue stays clear. music_db sets music level (e.g. -18). Music loops to fill.",
+     "input_schema": {"type": "object", "properties": {
+         "input": {"type": "string"}, "music": {"type": "string"}, "output": {"type": "string"},
+         "music_db": {"type": "number"}, "duck": {"type": "boolean"}},
+      "required": ["input", "music", "output"]}},
+    {"name": "detect_beats",
+     "description": "Detect tempo + beat timestamps in a music track so you can cut on the beat. Returns BPM and beat times in seconds.",
+     "input_schema": {"type": "object", "properties": {"music": {"type": "string"}}, "required": ["music"]}},
 ]
 
 
