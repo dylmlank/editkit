@@ -352,6 +352,159 @@ def detect_beats(music: str) -> str:
             f"Beat times (s): {head}{' ...' if len(times) > 48 else ''}")
 
 
+# --- Composition: transitions, zoom, overlay, grade, thumbnail, formats ------
+
+def _dims(path: str):
+    """(width, height, fps) of a video's first video stream, or None."""
+    p = subprocess.run(["ffprobe", "-v", "error", "-select_streams", "v:0",
+                       "-show_entries", "stream=width,height,r_frame_rate",
+                       "-of", "json", path], capture_output=True, text=True)
+    try:
+        s = json.loads(p.stdout)["streams"][0]
+        num, den = (s.get("r_frame_rate") or "30/1").split("/")
+        fps = round(float(num) / float(den)) if float(den) else 30
+        return int(s["width"]), int(s["height"]), (fps or 30)
+    except Exception:
+        return None
+
+
+def transition(input_a: str, input_b: str, output: str, kind: str = "fade",
+               duration: float = 0.5) -> str:
+    """Cross-fade from clip A into clip B. kind: fade|fadeblack|fadewhite|dissolve|
+    wipeleft|wiperight|slideup|slidedown|circleopen|circleclose. Re-scales B to A's
+    size so mismatched clips still join."""
+    for f in (input_a, input_b):
+        if not Path(f).exists():
+            return f"No such file: {f}"
+    durA = _duration(input_a)
+    if durA is None:
+        return "Could not read duration of input_a."
+    d = float(duration)
+    off = max(0.0, durA - d)
+    w, h, fps = _dims(input_a) or (1920, 1080, 30)
+    out = _out(output)
+    vfc = (f"[0:v]scale={w}:{h},fps={fps},format=yuv420p,setsar=1[v0];"
+           f"[1:v]scale={w}:{h},fps={fps},format=yuv420p,setsar=1[v1];"
+           f"[v0][v1]xfade=transition={kind}:duration={d}:offset={off:.3f}[v]")
+    fc = vfc + f";[0:a][1:a]acrossfade=d={d}[a]"
+    r = _ff(["-i", input_a, "-i", input_b, "-filter_complex", fc,
+             "-map", "[v]", "-map", "[a]", out])
+    if r != "ok":  # one of the clips may have no audio — retry video-only
+        r = _ff(["-i", input_a, "-i", input_b, "-filter_complex", vfc,
+                 "-map", "[v]", "-an", out])
+    return f"Transition '{kind}' -> {out}" if r == "ok" else r
+
+
+def zoom_punch(input: str, output: str, zoom: float = 1.3) -> str:
+    """Smooth Ken-Burns zoom-in across the whole clip (1.0 -> zoom). The trendy
+    slow-push that adds energy to a static shot."""
+    if not Path(input).exists():
+        return f"No such file: {input}"
+    dims, dur = _dims(input), _duration(input)
+    if not dims or not dur:
+        return "Could not read the video."
+    w, h, fps = dims
+    total = max(1, round(dur * fps))
+    z = f"min(1+(on/{total})*({float(zoom)}-1)\\,{float(zoom)})"
+    vf = (f"zoompan=z='{z}':d=1:x='iw/2-(iw/zoom/2)':y='ih/2-(ih/zoom/2)':"
+          f"s={w}x{h}:fps={fps}")
+    out = _out(output)
+    r = _ff(["-i", input, "-vf", vf, "-c:a", "copy", out])
+    return f"Zoom punch x{zoom} -> {out}" if r == "ok" else r
+
+
+def overlay(input: str, over: str, output: str, position: str = "top-right",
+            scale: float = 0.25, start: float | None = None, end: float | None = None) -> str:
+    """Overlay an image/video (logo, b-roll, picture-in-picture) on the main video.
+    position: top-left|top-right|bottom-left|bottom-right|center. scale = fraction of
+    overlay's own width. start/end (seconds) show it only in that window."""
+    for f in (input, over):
+        if not Path(f).exists():
+            return f"No such file: {f}"
+    x, y = {"top-left": ("20", "20"), "top-right": ("W-w-20", "20"),
+            "bottom-left": ("20", "H-h-20"), "bottom-right": ("W-w-20", "H-h-20"),
+            "center": ("(W-w)/2", "(H-h)/2")}.get(position, ("W-w-20", "20"))
+    enable = (f":enable='between(t,{start},{end})'"
+              if start is not None and end is not None else "")
+    fc = f"[1:v]scale=iw*{float(scale)}:-1[ov];[0:v][ov]overlay=x={x}:y={y}{enable}[v]"
+    out = _out(output)
+    r = _ff(["-i", input, "-i", over, "-filter_complex", fc,
+             "-map", "[v]", "-map", "0:a?", "-c:a", "copy", out])
+    return f"Overlay ({position}) -> {out}" if r == "ok" else r
+
+
+def color_grade(input: str, output: str, preset: str = "", saturation: float = 1.0,
+                contrast: float = 1.0, brightness: float = 0.0, gamma: float = 1.0) -> str:
+    """Color-grade a clip. preset: warm|cool|cinematic|vivid|bw|vintage. You can also
+    pass manual saturation/contrast/brightness/gamma (applied after the preset)."""
+    if not Path(input).exists():
+        return f"No such file: {input}"
+    presets = {
+        "warm": "colorbalance=rm=0.10:gm=0.04:bm=-0.10",
+        "cool": "colorbalance=rm=-0.10:bm=0.12",
+        "cinematic": "colorbalance=rs=-0.06:bs=0.08:rh=0.08:bh=-0.06,eq=contrast=1.08:saturation=0.95",
+        "vivid": "eq=saturation=1.4:contrast=1.1",
+        "bw": "hue=s=0",
+        "vintage": "curves=preset=vintage",
+    }
+    chain = []
+    if preset:
+        p = presets.get(preset.lower())
+        if not p:
+            return f"Unknown preset {preset!r} (warm|cool|cinematic|vivid|bw|vintage)."
+        chain.append(p)
+    if (saturation, contrast, brightness, gamma) != (1.0, 1.0, 0.0, 1.0):
+        chain.append(f"eq=contrast={contrast}:brightness={brightness}:"
+                     f"saturation={saturation}:gamma={gamma}")
+    if not chain:
+        return "Nothing to do — pass a preset or non-default eq values."
+    out = _out(output)
+    r = _ff(["-i", input, "-vf", ",".join(chain), "-c:a", "copy", out])
+    return f"Graded ({preset or 'manual'}) -> {out}" if r == "ok" else r
+
+
+def thumbnail(input: str, output: str = "thumbnail.jpg", text: str = "",
+              at: str = "00:00:01", font_size: int = 90) -> str:
+    """Grab a single frame as a thumbnail and (optionally) burn a big centered hook
+    headline on it. Great for YouTube/Shorts covers."""
+    if not Path(input).exists():
+        return f"No such file: {input}"
+    out = _out(output)
+    args = ["-ss", str(at), "-i", input, "-frames:v", "1"]
+    if text:
+        esc = text.replace("'", "’").replace(":", "\\:")
+        args += ["-vf", f"drawtext=text='{esc}':fontcolor=white:fontsize={font_size}:"
+                 f"borderw=5:bordercolor=black:x=(w-text_w)/2:y=(h-text_h)/2"]
+    args += ["-q:v", "2", out]
+    r = _ff(args)
+    return f"Thumbnail -> {out}" if r == "ok" else r
+
+
+def export_formats(input: str, base_name: str = "export",
+                   formats: list[str] | None = None) -> str:
+    """Render the video to multiple aspect ratios at once: 9x16 (TikTok/Shorts),
+    1x1 (feed), 16x9 (YouTube). Center-crops/pads as needed. Outputs base_name_<fmt>.mp4."""
+    if not Path(input).exists():
+        return f"No such file: {input}"
+    formats = formats or ["9x16", "1x1", "16x9"]
+    recipe = {
+        "9x16": "crop=ih*9/16:ih,scale=1080:1920",
+        "1x1": "crop=min(iw\\,ih):min(iw\\,ih),scale=1080:1080",
+        "16x9": "scale=1920:1080:force_original_aspect_ratio=decrease,"
+                "pad=1920:1080:(ow-iw)/2:(oh-ih)/2",
+    }
+    made = []
+    for fmt in formats:
+        vf = recipe.get(fmt)
+        if not vf:
+            made.append(f"{fmt}: skipped (unknown — use 9x16|1x1|16x9)")
+            continue
+        out = _out(f"{base_name}_{fmt}.mp4")
+        r = _ff(["-i", input, "-vf", vf, "-c:a", "aac", out])
+        made.append(f"{fmt} -> {out}" if r == "ok" else f"{fmt}: {r.splitlines()[0]}")
+    return "Exported formats:\n  " + "\n  ".join(made)
+
+
 _HANDLERS = {
     "probe": probe, "transcribe": transcribe, "make_clip": make_clip,
     "speed": speed, "add_text": add_text, "concat": concat,
@@ -359,6 +512,8 @@ _HANDLERS = {
     "auto_jumpcut": auto_jumpcut, "captions": captions,
     "reframe_vertical": reframe_vertical, "normalize_audio": normalize_audio,
     "add_music": add_music, "detect_beats": detect_beats,
+    "transition": transition, "zoom_punch": zoom_punch, "overlay": overlay,
+    "color_grade": color_grade, "thumbnail": thumbnail, "export_formats": export_formats,
 }
 
 TOOLS = [
@@ -423,6 +578,43 @@ TOOLS = [
     {"name": "detect_beats",
      "description": "Detect tempo + beat timestamps in a music track so you can cut on the beat. Returns BPM and beat times in seconds.",
      "input_schema": {"type": "object", "properties": {"music": {"type": "string"}}, "required": ["music"]}},
+    {"name": "transition",
+     "description": "Cross-fade clip A into clip B. kind: fade|fadeblack|fadewhite|dissolve|wipeleft|wiperight|slideup|slidedown|circleopen|circleclose. Re-scales B to match A. Use between scenes instead of a hard concat.",
+     "input_schema": {"type": "object", "properties": {
+         "input_a": {"type": "string"}, "input_b": {"type": "string"}, "output": {"type": "string"},
+         "kind": {"type": "string"}, "duration": {"type": "number"}},
+      "required": ["input_a", "input_b", "output"]}},
+    {"name": "zoom_punch",
+     "description": "Smooth Ken-Burns zoom-in across the whole clip (1.0 -> zoom). Adds energy/motion to a static shot — a core trendy move. zoom e.g. 1.3.",
+     "input_schema": {"type": "object", "properties": {
+         "input": {"type": "string"}, "output": {"type": "string"}, "zoom": {"type": "number"}},
+      "required": ["input", "output"]}},
+    {"name": "overlay",
+     "description": "Overlay an image/video (logo, picture-in-picture, b-roll) on the main video. position: top-left|top-right|bottom-left|bottom-right|center. scale = fraction of overlay width. start/end (s) limit when it shows.",
+     "input_schema": {"type": "object", "properties": {
+         "input": {"type": "string"}, "over": {"type": "string"}, "output": {"type": "string"},
+         "position": {"type": "string"}, "scale": {"type": "number"},
+         "start": {"type": "number"}, "end": {"type": "number"}},
+      "required": ["input", "over", "output"]}},
+    {"name": "color_grade",
+     "description": "Color-grade a clip. preset: warm|cool|cinematic|vivid|bw|vintage. Optionally pass saturation/contrast/brightness/gamma for manual control (applied after the preset).",
+     "input_schema": {"type": "object", "properties": {
+         "input": {"type": "string"}, "output": {"type": "string"}, "preset": {"type": "string"},
+         "saturation": {"type": "number"}, "contrast": {"type": "number"},
+         "brightness": {"type": "number"}, "gamma": {"type": "number"}},
+      "required": ["input", "output"]}},
+    {"name": "thumbnail",
+     "description": "Grab a frame as a thumbnail and optionally burn a big centered hook headline — for YouTube/Shorts covers. at = timestamp to grab (HH:MM:SS).",
+     "input_schema": {"type": "object", "properties": {
+         "input": {"type": "string"}, "output": {"type": "string"}, "text": {"type": "string"},
+         "at": {"type": "string"}, "font_size": {"type": "integer"}},
+      "required": ["input"]}},
+    {"name": "export_formats",
+     "description": "Render to multiple aspect ratios at once: 9x16 (TikTok/Shorts), 1x1 (feed), 16x9 (YouTube). Center-crops/pads. Outputs base_name_<fmt>.mp4 for each.",
+     "input_schema": {"type": "object", "properties": {
+         "input": {"type": "string"}, "base_name": {"type": "string"},
+         "formats": {"type": "array", "items": {"type": "string"}}},
+      "required": ["input"]}},
 ]
 
 

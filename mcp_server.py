@@ -107,5 +107,47 @@ def detect_beats(music: str) -> str:
     return T.detect_beats(music)
 
 
+@mcp.tool()
+def transition(input_a: str, input_b: str, output: str, kind: str = "fade",
+               duration: float = 0.5) -> str:
+    """Cross-fade clip A into clip B (fade|dissolve|wipeleft|slideup|circleopen...)."""
+    return T.transition(input_a, input_b, output, kind, duration)
+
+
+@mcp.tool()
+def zoom_punch(input: str, output: str, zoom: float = 1.3) -> str:
+    """Smooth Ken-Burns zoom-in across the clip (1.0 -> zoom) — trendy slow push."""
+    return T.zoom_punch(input, output, zoom)
+
+
+@mcp.tool()
+def overlay(input: str, over: str, output: str, position: str = "top-right",
+            scale: float = 0.25, start: float = -1.0, end: float = -1.0) -> str:
+    """Overlay a logo / picture-in-picture / b-roll. start/end<0 = always shown."""
+    s = None if start < 0 else start
+    e = None if end < 0 else end
+    return T.overlay(input, over, output, position, scale, s, e)
+
+
+@mcp.tool()
+def color_grade(input: str, output: str, preset: str = "", saturation: float = 1.0,
+                contrast: float = 1.0, brightness: float = 0.0, gamma: float = 1.0) -> str:
+    """Color-grade: preset warm|cool|cinematic|vivid|bw|vintage + manual eq."""
+    return T.color_grade(input, output, preset, saturation, contrast, brightness, gamma)
+
+
+@mcp.tool()
+def thumbnail(input: str, output: str = "thumbnail.jpg", text: str = "",
+              at: str = "00:00:01", font_size: int = 90) -> str:
+    """Grab a frame + optional big hook headline for a YouTube/Shorts cover."""
+    return T.thumbnail(input, output, text, at, font_size)
+
+
+@mcp.tool()
+def export_formats(input: str, base_name: str = "export", formats: list | None = None) -> str:
+    """Render to multiple aspect ratios at once: 9x16, 1x1, 16x9."""
+    return T.export_formats(input, base_name, formats)
+
+
 if __name__ == "__main__":
     mcp.run()
