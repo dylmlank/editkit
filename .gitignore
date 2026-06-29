@@ -1,0 +1,15 @@
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+
+# Output / caches / secrets
+output/
+*.srt
+.env
+
+# Editor / OS
+.vscode/
+.DS_Store
+Thumbs.db
