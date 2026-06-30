@@ -16,12 +16,21 @@ from __future__ import annotations
 
 import os
 import queue
+import sys
 import threading
 from pathlib import Path
 
-# Load E:\editkit\.env into the environment before anything reads the key.
+
+def _app_dir() -> Path:
+    """Folder the program lives in (next to the .exe when frozen)."""
+    if getattr(sys, "frozen", False):
+        return Path(sys.executable).parent
+    return Path(__file__).parent
+
+
+# Load .env (next to the program) into the environment before anything reads the key.
 def _load_env():
-    env = Path(__file__).parent / ".env"
+    env = _app_dir() / ".env"
     if env.exists():
         for line in env.read_text(encoding="utf-8").splitlines():
             line = line.strip()
@@ -154,7 +163,32 @@ class App:
         threading.Thread(target=worker, daemon=True).start()
 
 
+def _selftest():
+    """Verify a frozen build loads, then exit. Run as: EditKit.exe --selftest"""
+    import json
+    result = {"app": "EditKit", "frozen": bool(getattr(sys, "frozen", False))}
+    try:
+        import anthropic
+        anthropic.Anthropic(api_key="selftest")
+        result["anthropic"] = anthropic.__version__
+    except Exception as e:
+        result["anthropic"] = f"FAIL: {e}"
+    try:
+        root = tk.Tk()
+        App(root)
+        root.update()
+        root.destroy()
+        result["ui"] = "ok"
+    except Exception as e:
+        result["ui"] = f"FAIL: {e}"
+    (_app_dir() / "selftest.json").write_text(json.dumps(result), encoding="utf-8")
+    print(json.dumps(result))
+
+
 def main():
+    if "--selftest" in sys.argv:
+        _selftest()
+        return
     root = tk.Tk()
     App(root)
     root.mainloop()
