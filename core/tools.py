@@ -505,6 +505,55 @@ def export_formats(input: str, base_name: str = "export",
     return "Exported formats:\n  " + "\n  ".join(made)
 
 
+# --- Pipeline: one command from raw clip to platform-ready short -------------
+
+def make_short(input: str, output: str = "short.mp4", music: str = "",
+               grade: str = "", threshold_db: float = -30.0,
+               max_words: int = 5, font_size: int = 64) -> str:
+    """Raw talking clip -> finished vertical short in one call. Chains
+    auto_jumpcut -> reframe_vertical -> color_grade (optional) -> captions ->
+    add_music (optional, ducked) -> normalize_audio. A step that finds nothing
+    to do (e.g. no speech to caption) is skipped, not fatal."""
+    if not Path(input).exists():
+        return f"No such file: {input}"
+    log, tmp = [], []
+    cur = input
+
+    def step(name: str, thunk) -> None:
+        nonlocal cur
+        target = _out(name)
+        Path(target).unlink(missing_ok=True)
+        msg = thunk()
+        if Path(target).exists():
+            tmp.append(target)
+            cur = target
+            log.append(msg.splitlines()[0])
+        else:
+            log.append(f"skipped — {msg.splitlines()[0]}")
+
+    step("_short_cut.mp4", lambda: auto_jumpcut(cur, "_short_cut.mp4", threshold_db))
+    step("_short_916.mp4", lambda: reframe_vertical(cur, "_short_916.mp4"))
+    if grade:
+        step("_short_grade.mp4", lambda: color_grade(cur, "_short_grade.mp4", grade))
+    step("_short_cap.mp4", lambda: captions(cur, "_short_cap.mp4", max_words, font_size))
+    if music:
+        step("_short_music.mp4", lambda: add_music(cur, music, "_short_music.mp4"))
+    if cur == input:
+        return "Pipeline produced nothing:\n  " + "\n  ".join(log)
+
+    final = _out(output)
+    Path(final).unlink(missing_ok=True)
+    msg = normalize_audio(cur, output)
+    if Path(final).exists():
+        log.append(msg.splitlines()[0])
+    else:
+        shutil.move(cur, final)
+        log.append(f"skipped normalize — {msg.splitlines()[0]}")
+    for t in tmp:
+        Path(t).unlink(missing_ok=True)
+    return f"Short -> {final}\n  " + "\n  ".join(log)
+
+
 _HANDLERS = {
     "probe": probe, "transcribe": transcribe, "make_clip": make_clip,
     "speed": speed, "add_text": add_text, "concat": concat,
@@ -514,6 +563,7 @@ _HANDLERS = {
     "add_music": add_music, "detect_beats": detect_beats,
     "transition": transition, "zoom_punch": zoom_punch, "overlay": overlay,
     "color_grade": color_grade, "thumbnail": thumbnail, "export_formats": export_formats,
+    "make_short": make_short,
 }
 
 TOOLS = [
@@ -609,6 +659,13 @@ TOOLS = [
          "input": {"type": "string"}, "output": {"type": "string"}, "text": {"type": "string"},
          "at": {"type": "string"}, "font_size": {"type": "integer"}},
       "required": ["input"]}},
+    {"name": "make_short",
+     "description": "One-command pipeline: raw talking clip -> finished vertical short (jump-cut silences, face-aware 9:16, karaoke captions, optional color grade + ducked music bed, -14 LUFS). Use this first; reach for the individual tools only for custom edits.",
+     "input_schema": {"type": "object", "properties": {
+         "input": {"type": "string"}, "output": {"type": "string"},
+         "music": {"type": "string"}, "grade": {"type": "string"},
+         "threshold_db": {"type": "number"}, "max_words": {"type": "integer"},
+         "font_size": {"type": "integer"}}, "required": ["input"]}},
     {"name": "export_formats",
      "description": "Render to multiple aspect ratios at once: 9x16 (TikTok/Shorts), 1x1 (feed), 16x9 (YouTube). Center-crops/pads. Outputs base_name_<fmt>.mp4 for each.",
      "input_schema": {"type": "object", "properties": {

@@ -149,5 +149,14 @@ def export_formats(input: str, base_name: str = "export", formats: list | None =
     return T.export_formats(input, base_name, formats)
 
 
+@mcp.tool()
+def make_short(input: str, output: str = "short.mp4", music: str = "",
+               grade: str = "", threshold_db: float = -30.0,
+               max_words: int = 5, font_size: int = 64) -> str:
+    """One-command pipeline: raw talking clip -> finished vertical short
+    (jump-cut, face-aware 9:16, karaoke captions, optional grade/music, -14 LUFS)."""
+    return T.make_short(input, output, music, grade, threshold_db, max_words, font_size)
+
+
 if __name__ == "__main__":
     mcp.run()

@@ -8,9 +8,10 @@ and Claude runs EditKit's tools on it. Outputs land in editkit/output/.
 Run it:
     uv run --python 3.12 --with anthropic --with faster-whisper python companion.py
 
-API key: set ANTHROPIC_API_KEY, or put it in a file `E:\editkit\.env` as
-    ANTHROPIC_API_KEY=sk-ant-...
-No key yet? The window still opens and shows you exactly where to add one.
+API key: put your OpenRouter key in a file `E:\editkit\.env` as
+    OPENROUTER_API_KEY=sk-or-v1-...
+and choose a model with EDITKIT_MODEL. No key yet? The window still opens and
+shows you exactly where to add one.
 """
 from __future__ import annotations
 
@@ -44,8 +45,9 @@ _load_env()
 import tkinter as tk  # noqa: E402
 from tkinter import filedialog, scrolledtext  # noqa: E402
 
-from config import MODEL, OUTPUT_DIR  # noqa: E402
+from config import OUTPUT_DIR  # noqa: E402
 from core import TOOLS, dispatch  # noqa: E402
+from core.llm import make_client, run_loop  # noqa: E402
 
 SYSTEM = (
     "You are EditKit, a video-editing assistant. You operate on local files with "
@@ -58,26 +60,10 @@ SYSTEM = (
 
 
 def run_agent(prompt: str, log) -> None:
-    import anthropic
-    client = anthropic.Anthropic()
+    client = make_client()
     messages = [{"role": "user", "content": prompt}]
-    while True:
-        resp = client.messages.create(
-            model=MODEL, max_tokens=4096, thinking={"type": "adaptive"},
-            system=SYSTEM, tools=TOOLS, messages=messages)
-        messages.append({"role": "assistant", "content": resp.content})
-        for b in resp.content:
-            if b.type == "text" and b.text.strip():
-                log(b.text.strip())
-        if resp.stop_reason != "tool_use":
-            return
-        results = []
-        for b in resp.content:
-            if b.type == "tool_use":
-                out = dispatch(b.name, b.input)
-                log(f"  · {b.name} -> {str(out)[:160]}")
-                results.append({"type": "tool_result", "tool_use_id": b.id, "content": str(out)})
-        messages.append({"role": "user", "content": results})
+    run_loop(client, TOOLS, lambda n, a: dispatch(n, a),
+             SYSTEM, messages, log, max_tokens=4096)
 
 
 class App:
@@ -88,12 +74,13 @@ class App:
         root.geometry("560x520")
         root.attributes("-topmost", True)
 
-        self.have_key = bool(os.environ.get("ANTHROPIC_API_KEY"))
+        self.have_key = bool(os.environ.get("OPENROUTER_API_KEY")
+                             or os.environ.get("ANTHROPIC_API_KEY"))
         if not self.have_key:
             banner = tk.Label(
                 root, bg="#7a1f1f", fg="white", anchor="w", justify="left",
-                text=(" No ANTHROPIC_API_KEY. Add it to E:\\editkit\\.env  "
-                      "(ANTHROPIC_API_KEY=sk-ant-...) and reopen."))
+                text=(" No OpenRouter key. Add OPENROUTER_API_KEY=sk-or-v1-... to "
+                      "E:\\editkit\\.env  (and set EDITKIT_MODEL) and reopen."))
             banner.pack(fill="x")
 
         top = tk.Frame(root)
@@ -140,7 +127,7 @@ class App:
 
     def generate(self):
         if not self.have_key:
-            self.log("Add your API key to E:\\editkit\\.env first.")
+            self.log("Add OPENROUTER_API_KEY to E:\\editkit\\.env first.")
             return
         video = self.video.get().strip()
         prompt = self.prompt.get("1.0", "end").strip()
@@ -168,11 +155,11 @@ def _selftest():
     import json
     result = {"app": "EditKit", "frozen": bool(getattr(sys, "frozen", False))}
     try:
-        import anthropic
-        anthropic.Anthropic(api_key="selftest")
-        result["anthropic"] = anthropic.__version__
+        import openai
+        openai.OpenAI(base_url="https://openrouter.ai/api/v1", api_key="selftest")
+        result["openai"] = openai.__version__
     except Exception as e:
-        result["anthropic"] = f"FAIL: {e}"
+        result["openai"] = f"FAIL: {e}"
     try:
         root = tk.Tk()
         App(root)

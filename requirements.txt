@@ -1,5 +1,5 @@
 # EditKit
-anthropic>=0.40        # standalone agent (agent.py)
+openai>=1.40           # OpenRouter (OpenAI-compatible) generation — agent.py & companion.py
 mcp>=1.2               # MCP server / FastMCP (mcp_server.py)
 faster-whisper>=1.2    # transcription + word timing (transcribe, captions)
 opencv-python>=4.8     # optional: face-aware reframing (reframe_vertical)
